@@ -3,7 +3,7 @@ Unit tests for ExchangeGateway abstract base class.
 """
 
 import pytest
-from src.exchange.gateway import ExchangeGateway, OrderSide, OrderType, TimeInForce
+from src.exchange.gateway import ExchangeGateway, OrderSide, OrderType, TimeInForce, PositionMode
 
 
 class MockExchangeGateway(ExchangeGateway):
@@ -29,6 +29,12 @@ class MockExchangeGateway(ExchangeGateway):
 
     async def set_leverage(self, symbol, leverage):
         return {"symbol": symbol, "leverage": leverage}
+
+    async def get_position_mode(self):
+        return PositionMode.ONE_WAY
+
+    async def set_position_mode(self, mode):
+        return {"dualSidePosition": mode == PositionMode.HEDGE}
 
     async def submit_order(self, symbol, side, order_type, quantity, price=None,
                           time_in_force=TimeInForce.GTC, stop_price=None,

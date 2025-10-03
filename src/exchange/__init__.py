@@ -2,7 +2,7 @@
 Exchange gateway module for API integration.
 """
 
-from .gateway import ExchangeGateway, OrderSide, OrderType, TimeInForce
+from .gateway import ExchangeGateway, OrderSide, OrderType, TimeInForce, PositionMode
 from .exceptions import (
     ExchangeError,
     ExchangeAPIError,
@@ -15,12 +15,37 @@ from .exceptions import (
     ConnectionError,
     InvalidTransitionError
 )
+from .binance_gateway import BinanceGateway
+from .models import (
+    Order,
+    OrderStatus,
+    Balance,
+    Position,
+    PositionSide,
+    SymbolInfo,
+    Ticker,
+    OrderBook,
+    Candle
+)
+from .exchange_config import (
+    ExchangeType,
+    ExchangeConfig,
+    get_exchange_config,
+    normalize_symbol,
+    denormalize_symbol
+)
+from .rate_limiter import RateLimiter, GlobalRateLimiter
 
 __all__ = [
+    # Gateway interfaces
     "ExchangeGateway",
+    "BinanceGateway",
     "OrderSide",
     "OrderType",
     "TimeInForce",
+    "PositionMode",
+
+    # Exceptions
     "ExchangeError",
     "ExchangeAPIError",
     "TransientError",
@@ -30,5 +55,27 @@ __all__ = [
     "InvalidOrderError",
     "InsufficientBalanceError",
     "ConnectionError",
-    "InvalidTransitionError"
+    "InvalidTransitionError",
+
+    # Data models
+    "Order",
+    "OrderStatus",
+    "Balance",
+    "Position",
+    "PositionSide",
+    "SymbolInfo",
+    "Ticker",
+    "OrderBook",
+    "Candle",
+
+    # Exchange config
+    "ExchangeType",
+    "ExchangeConfig",
+    "get_exchange_config",
+    "normalize_symbol",
+    "denormalize_symbol",
+
+    # Rate limiting
+    "RateLimiter",
+    "GlobalRateLimiter"
 ]

@@ -34,6 +34,12 @@ class TimeInForce(Enum):
     FOK = "FOK"  # Fill or Kill
 
 
+class PositionMode(Enum):
+    """Position mode for futures trading."""
+    ONE_WAY = "ONE_WAY"      # Single position per symbol (default)
+    HEDGE = "HEDGE"          # Separate LONG and SHORT positions
+
+
 class ExchangeGateway(ABC):
     """
     Abstract base class for exchange gateway operations.
@@ -181,6 +187,41 @@ class ExchangeGateway(ABC):
         Raises:
             ExchangeAPIError: If API call fails
             NotImplementedError: If called on Spot market
+        """
+        pass
+
+    @abstractmethod
+    async def get_position_mode(self) -> PositionMode:
+        """
+        Get current position mode (Futures only).
+
+        Returns:
+            PositionMode enum (ONE_WAY or HEDGE)
+
+        Raises:
+            ExchangeAPIError: If API call fails
+            NotImplementedError: If called on Spot market
+        """
+        pass
+
+    @abstractmethod
+    async def set_position_mode(self, mode: PositionMode) -> Dict[str, Any]:
+        """
+        Set position mode (Futures only).
+
+        Args:
+            mode: Position mode to set (ONE_WAY or HEDGE)
+
+        Returns:
+            Response dictionary from exchange
+
+        Raises:
+            ExchangeAPIError: If API call fails
+            NotImplementedError: If called on Spot market
+
+        Note:
+            - Cannot change position mode if open positions exist
+            - Some exchanges require account-level setting
         """
         pass
 
