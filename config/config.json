@@ -1,0 +1,66 @@
+{
+  "exchange": {
+    "api_key": "QnwDVW892YwRZqCwkMFyZ7jsy7qSExPTtJr9TgB7oS8pf8DKq7ZiVV452OKbrABQ",
+    "api_secret": "InIhm2ii0tAm87GQbvX3cnfVhMRQ9VIcGcpnIHtbiTKBbsRImnie6f7vI4AKWah2",
+    "testnet": true,
+    "market_type": "futures"
+  },
+  "portfolio": {
+    "leverage_cap": 6.0,
+    "weights": {
+      "BTCUSDT": 0.45,
+      "ETHUSDT": 0.35,
+      "SOLUSDT": 0.20
+    }
+  },
+  "engine": {
+    "utilization": 0.3,
+    "max_orders_per_symbol": 25,
+    "base_leverage": 5,
+    "base_order_size": 100.0,
+    "baseline_spacing": 0.005
+  },
+  "risk": {
+    "drawdown_levels": [-0.05, -0.10, -0.15],
+    "stop_loss_enabled": true,
+    "max_position_size_pct": 0.10
+  },
+  "websocket": {
+    "reconnect_max_delay": 120,
+    "ping_interval": 20,
+    "listen_key_refresh_interval": 1800
+  },
+  "oms": {
+    "retry_attempts": 3,
+    "retry_backoff_base": 2,
+    "order_timeout_seconds": 30
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "json",
+    "log_dir": "logs",
+    "rotate_daily": true
+  },
+  "strategy": {
+    "systems": ["UP", "DOWN", "NEUTRAL"],
+    "adaptive_learning_enabled": true,
+    "learning_update_interval_hours": 168,
+    "min_entry_conviction_percentile": 80
+  },
+  "indicators": {
+    "ema_periods": [8, 21, 55],
+    "atr_period": 14,
+    "rsi_period": 14,
+    "bollinger_period": 20,
+    "bollinger_std": 2.0
+  },
+  "dynamic_parameters": {
+    "size_mult": 0.5,
+    "vol_mult": 0.3,
+    "imb_mult": 0.2,
+    "spacing_clamp_min": 0.5,
+    "spacing_clamp_max": 3.0,
+    "tp_conviction_mult": 0.3,
+    "tp_cap_multiplier": 2.0
+  }
+}
