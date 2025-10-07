@@ -44,6 +44,7 @@ from .exchange_config import (
     is_transient_error,
     is_permanent_error
 )
+from .websocket_manager import WebSocketManager
 from ..utils.logger import get_logger
 from ..utils.retry import retry_on_transient_error
 
@@ -84,6 +85,10 @@ class BinanceGateway(ExchangeGateway):
         # Initialize python-binance client
         self.client: Optional[Client] = None
 
+        # Initialize WebSocket manager
+        self.ws_manager = WebSocketManager(self.config, testnet=testnet)
+        self._listen_key: Optional[str] = None
+
         logger.info(
             "Binance gateway initialized",
             testnet=testnet,
@@ -117,6 +122,9 @@ class BinanceGateway(ExchangeGateway):
 
             self._is_connected = True
 
+            # Start WebSocket manager
+            await self.ws_manager.connect()
+
         except BinanceAPIException as e:
             logger.error("Binance API error during connection", error=str(e), code=e.code)
             raise self._map_exception(e)
@@ -126,6 +134,9 @@ class BinanceGateway(ExchangeGateway):
 
     async def disconnect(self) -> None:
         """Disconnect from Binance API."""
+        # Stop WebSocket manager
+        await self.ws_manager.disconnect()
+
         if self.client:
             # python-binance doesn't have explicit disconnect
             self.client = None
@@ -317,12 +328,8 @@ class BinanceGateway(ExchangeGateway):
                 last_price=Decimal(ticker['lastPrice']),
                 bid_price=Decimal(book_ticker['bidPrice']),
                 ask_price=Decimal(book_ticker['askPrice']),
-                volume_24h=Decimal(ticker['volume']),
-                quote_volume_24h=Decimal(ticker['quoteVolume']),
-                price_change_24h=Decimal(ticker['priceChange']),
-                price_change_pct_24h=Decimal(ticker['priceChangePercent']),
-                high_24h=Decimal(ticker['highPrice']),
-                low_24h=Decimal(ticker['lowPrice']),
+                bid_qty=Decimal(book_ticker['bidQty']),
+                ask_qty=Decimal(book_ticker['askQty']),
                 timestamp=datetime.fromtimestamp(int(ticker['closeTime']) / 1000)
             )
 
@@ -817,30 +824,6 @@ class BinanceGateway(ExchangeGateway):
             raise self._map_exception(e)
 
     # ========================================================================
-    # WebSocket Methods (Placeholder - Day 4-5 implementation)
-    # ========================================================================
-
-    async def subscribe_kline(self, symbol: str, interval: str, callback: Callable) -> None:
-        """Subscribe to candlestick stream."""
-        raise NotImplementedError("WebSocket implementation coming in Day 4-5")
-
-    async def subscribe_trade(self, symbol: str, callback: Callable) -> None:
-        """Subscribe to trade stream."""
-        raise NotImplementedError("WebSocket implementation coming in Day 4-5")
-
-    async def subscribe_book_ticker(self, symbol: str, callback: Callable) -> None:
-        """Subscribe to book ticker stream."""
-        raise NotImplementedError("WebSocket implementation coming in Day 4-5")
-
-    async def subscribe_user_data(self, callback: Callable) -> None:
-        """Subscribe to user data stream."""
-        raise NotImplementedError("WebSocket implementation coming in Day 4-5")
-
-    async def unsubscribe_all(self) -> None:
-        """Unsubscribe from all streams."""
-        raise NotImplementedError("WebSocket implementation coming in Day 4-5")
-
-    # ========================================================================
     # Helper Methods
     # ========================================================================
 
@@ -855,39 +838,170 @@ class BinanceGateway(ExchangeGateway):
         Returns:
             Order object
         """
-        # Map Binance status to internal OrderStatus
-        status_map = {
-            'NEW': OrderStatus.NEW,
-            'PARTIALLY_FILLED': OrderStatus.PARTIALLY_FILLED,
-            'FILLED': OrderStatus.FILLED,
-            'CANCELED': OrderStatus.CANCELED,
-            'REJECTED': OrderStatus.REJECTED,
-            'EXPIRED': OrderStatus.EXPIRED,
-        }
+        # Parse order type and price
+        order_type = response['type']
 
-        status = status_map.get(response['status'], OrderStatus.NEW)
+        # For MARKET orders, price is None
+        # For LIMIT orders, price is the limit price
+        if order_type == "MARKET":
+            price = None
+        else:
+            price = Decimal(response['price']) if response.get('price') and response['price'] != '0' else None
+
+        # Average fill price (0 if not filled yet)
+        avg_fill_price = Decimal(response.get('avgPrice', '0'))
+        if avg_fill_price == 0 and response.get('executedQty', '0') != '0':
+            # Try to calculate from cumulative quote qty / executed qty
+            executed_qty = Decimal(response.get('executedQty', '0'))
+            cum_quote = Decimal(response.get('cumQuote', '0'))
+            if executed_qty > 0 and cum_quote > 0:
+                avg_fill_price = cum_quote / executed_qty
 
         return Order(
             order_id=str(response['orderId']),
-            client_order_id=response.get('clientOrderId'),
+            client_order_id=response.get('clientOrderId', ''),
             symbol=symbol,
             side=response['side'],
-            order_type=response['type'],
-            status=status,
+            order_type=order_type,
+            status=response['status'],
             quantity=Decimal(response['origQty']),
-            executed_qty=Decimal(response['executedQty']),
-            remaining_qty=Decimal(response['origQty']) - Decimal(response['executedQty']),
-            price=Decimal(response['price']) if response.get('price') else None,
-            avg_price=Decimal(response['avgPrice']) if response.get('avgPrice') and response['avgPrice'] != '0' else None,
-            stop_price=Decimal(response['stopPrice']) if response.get('stopPrice') else None,
-            cumulative_quote_qty=Decimal(response.get('cumQuote', '0')),
+            price=price,
+            average_fill_price=avg_fill_price,
             commission=Decimal('0'),  # Commission not in order response, comes from fills
-            commission_asset='',
-            time_in_force=response.get('timeInForce', 'GTC'),
-            created_at=datetime.fromtimestamp(response['time'] / 1000) if 'time' in response else datetime.now(),
-            updated_at=datetime.fromtimestamp(response['updateTime'] / 1000) if 'updateTime' in response else datetime.now(),
-            raw_data=response
+            commission_asset='USDT'  # Default, actual value comes from fills
         )
+
+    # ========================================================================
+    # WebSocket Methods
+    # ========================================================================
+
+    async def subscribe_kline(
+        self,
+        symbol: str,
+        interval: str,
+        callback: Callable
+    ):
+        """
+        Subscribe to kline (candlestick) data stream.
+
+        Callback receives Candle objects for CLOSED candles only.
+        For 1m interval, callback is invoked once per minute when candle closes.
+
+        Args:
+            symbol: Normalized symbol (e.g., "BTC/USDT")
+            interval: Kline interval (e.g., "1m", "15m", "1h", "1d")
+            callback: Function to call with Candle objects
+        """
+        binance_symbol = denormalize_symbol(symbol, self.exchange_type)
+        await self.ws_manager.subscribe_kline(binance_symbol, interval, callback)
+
+    async def subscribe_trade(
+        self,
+        symbol: str,
+        callback: Callable
+    ):
+        """
+        Subscribe to trade data stream.
+
+        Callback receives Trade objects for each trade execution.
+
+        Args:
+            symbol: Normalized symbol (e.g., "BTC/USDT")
+            callback: Function to call with Trade objects
+        """
+        binance_symbol = denormalize_symbol(symbol, self.exchange_type)
+        await self.ws_manager.subscribe_trade(binance_symbol, callback)
+
+    async def subscribe_book_ticker(
+        self,
+        symbol: str,
+        callback: Callable
+    ):
+        """
+        Subscribe to book ticker (best bid/ask) stream.
+
+        Callback receives Ticker objects with best bid/ask prices.
+
+        Args:
+            symbol: Normalized symbol (e.g., "BTC/USDT")
+            callback: Function to call with Ticker objects
+        """
+        binance_symbol = denormalize_symbol(symbol, self.exchange_type)
+        await self.ws_manager.subscribe_book_ticker(binance_symbol, callback)
+
+    async def subscribe_user_data(
+        self,
+        callback: Callable
+    ):
+        """
+        Subscribe to user data stream (order updates, balance changes).
+
+        Callback receives Order or AccountUpdate objects depending on event type.
+
+        Args:
+            callback: Function to call with Order or AccountUpdate objects
+        """
+        # Generate listen key if not already done
+        if not self._listen_key:
+            self._listen_key = await self._get_listen_key()
+
+        await self.ws_manager.subscribe_user_data(self._listen_key, callback)
+
+    async def unsubscribe_all(self):
+        """Unsubscribe from all WebSocket streams."""
+        await self.ws_manager.unsubscribe_all()
+
+    async def _get_listen_key(self) -> str:
+        """
+        Get listen key for user data stream.
+
+        Returns:
+            Listen key string
+        """
+        try:
+            if not self.client:
+                raise ExchangeConnectionError("Not connected to exchange")
+
+            # Get listen key for Futures (synchronous call)
+            result = self.client.futures_stream_get_listen_key()
+
+            # Handle both dict response and direct string response
+            if isinstance(result, dict):
+                listen_key = result['listenKey']
+            elif isinstance(result, str):
+                listen_key = result
+            else:
+                raise ExchangeAPIError(f"Unexpected listen key response type: {type(result)}")
+
+            logger.info("Listen key obtained for user data stream", listen_key=listen_key[:8] + "...")
+
+            return listen_key
+
+        except BinanceAPIException as e:
+            logger.error("Failed to get listen key", error=str(e), code=e.code)
+            raise self._map_exception(e)
+        except Exception as e:
+            logger.error("Unexpected error getting listen key", error=str(e))
+            raise ExchangeAPIError(f"Failed to get listen key: {e}")
+
+    async def _refresh_listen_key(self):
+        """Refresh listen key to keep user data stream alive."""
+        try:
+            if not self.client or not self._listen_key:
+                return
+
+            # Refresh listen key for Futures
+            self.client.futures_stream_keepalive(listenKey=self._listen_key)
+
+            logger.debug("Listen key refreshed")
+
+        except BinanceAPIException as e:
+            logger.error("Failed to refresh listen key", error=str(e), code=e.code)
+            raise self._map_exception(e)
+
+    # ========================================================================
+    # Error Handling
+    # ========================================================================
 
     def _map_exception(self, e: BinanceAPIException) -> Exception:
         """

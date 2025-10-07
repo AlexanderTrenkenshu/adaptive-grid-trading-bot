@@ -25,7 +25,11 @@ from .models import (
     SymbolInfo,
     Ticker,
     OrderBook,
-    Candle
+    Candle,
+    Trade,
+    AccountBalance,
+    AccountPosition,
+    AccountUpdate
 )
 from .exchange_config import (
     ExchangeType,
@@ -35,6 +39,8 @@ from .exchange_config import (
     denormalize_symbol
 )
 from .rate_limiter import RateLimiter, GlobalRateLimiter
+from .websocket_manager import WebSocketManager
+from .websocket_parser import WebSocketParser
 
 __all__ = [
     # Gateway interfaces
@@ -67,6 +73,10 @@ __all__ = [
     "Ticker",
     "OrderBook",
     "Candle",
+    "Trade",
+    "AccountBalance",
+    "AccountPosition",
+    "AccountUpdate",
 
     # Exchange config
     "ExchangeType",
@@ -77,5 +87,9 @@ __all__ = [
 
     # Rate limiting
     "RateLimiter",
-    "GlobalRateLimiter"
+    "GlobalRateLimiter",
+
+    # WebSocket
+    "WebSocketManager",
+    "WebSocketParser"
 ]
